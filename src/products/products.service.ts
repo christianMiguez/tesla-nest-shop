@@ -8,8 +8,8 @@ import {
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { Product } from './entities/product.entity';
+import { DataSource, Repository } from 'typeorm';
+import { Product, ProductImage } from './entities';
 import { PaginationDto } from '../common/dto/pagination.dto';
 import { validate as isUUID } from 'uuid';
 
@@ -21,25 +21,47 @@ export class ProductsService {
     // repository pattern to access the database through the service.
     @InjectRepository(Product)
     private readonly productRepository: Repository<Product>,
+
+    @InjectRepository(ProductImage)
+    private readonly productImageRepository: Repository<ProductImage>,
+
+    private readonly dataSource: DataSource,
   ) {}
 
   async create(createProductDto: CreateProductDto) {
     try {
-      const product = this.productRepository.create(createProductDto); // create instance of product
+      const { images = [], ...productDetails } = createProductDto;
+      const product = this.productRepository.create({
+        ...productDetails,
+        images: images.map((image) =>
+          this.productImageRepository.create({ url: image }),
+        ),
+      }); // create instance of product
 
       await this.productRepository.save(product); // save instance of product to database
       this.logger.log('Product created');
-      return product;
+      return { ...product, images };
     } catch (error) {
       this.handleDBException(error);
     }
   }
 
-  findAll(paginationDto: PaginationDto) {
+  async findAll(paginationDto: PaginationDto) {
     const { limit, offset } = paginationDto;
-    return this.productRepository.find({
+    const products = await this.productRepository.find({
       take: limit,
       skip: offset,
+      relations: {
+        images: true,
+      },
+    });
+
+    return products.map((product) => {
+      const { images, ...productDetails } = product;
+      return {
+        ...productDetails,
+        images: images.map((image) => image.url),
+      };
     });
   }
 
@@ -57,6 +79,7 @@ export class ProductsService {
           title: term.toUpperCase(),
           slug: term.toLowerCase(),
         })
+        .leftJoinAndSelect('product.images', 'images')
         .getOne();
     }
 
@@ -68,20 +91,45 @@ export class ProductsService {
   }
 
   async update(id: string, updateProductDto: UpdateProductDto) {
+    const { images, ...productToUpdateDetails } = updateProductDto;
+
     const product = await this.productRepository.preload({
       id,
-      ...updateProductDto,
+      ...productToUpdateDetails,
     }); // no actualiza solo crea una nueva instancia con los nuevos datos
 
     if (!product) {
       throw new NotFoundException('Product not found');
     }
 
+    // create query runner to perform a transaction for updating images. Remember that we are using a single table for both product and product images.
+    const queryRunner = this.dataSource.createQueryRunner();
+
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
     try {
-      this.logger.log('Product updated');
-      await this.productRepository.save(product);
-      return product;
+      if (images) {
+        // delete all images
+        await queryRunner.manager.delete(ProductImage, {
+          product: {
+            id,
+          },
+        });
+
+        product.images = images.map((image) =>
+          this.productImageRepository.create({ url: image }),
+        );
+      }
+
+      await queryRunner.manager.save(product);
+      await queryRunner.commitTransaction();
+      await queryRunner.release();
+
+      return this.findOnePlain(id);
     } catch (error) {
+      await queryRunner.rollbackTransaction();
+      await queryRunner.release();
       this.handleDBException(error);
     }
   }
@@ -107,5 +155,23 @@ export class ProductsService {
     throw new InternalServerErrorException(
       'Unexpected Error, check server logs',
     );
+  }
+
+  async findOnePlain(term: string) {
+    const { images = [], ...restProductDetails } = await this.findOne(term);
+    return {
+      ...restProductDetails,
+      images: images.map((image) => image.url),
+    };
+  }
+
+  async deleteAllProducts() {
+    const query = this.productRepository.createQueryBuilder('product');
+
+    try {
+      return await query.delete().where({}).execute();
+    } catch (error) {
+      this.handleDBException(error);
+    }
   }
 }
