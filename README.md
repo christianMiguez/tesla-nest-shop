@@ -14,3 +14,9 @@ docker-compose up -d
 ```
 
 5. `yarn start:dev`
+
+6. Execute seed
+
+```
+http://localhost:3000/api/seed
+```
