@@ -15,8 +15,10 @@ docker-compose up -d
 
 5. `yarn start:dev`
 
-6. Execute seed
+6. Execute seed (disable Auth() from seed.controller.ts)
 
 ```
 http://localhost:3000/api/seed
 ```
+
+7. Enable Auth() from seed.controller.ts
