@@ -32,7 +32,13 @@ export class AuthController {
     return this.authService.login(loginUserDto);
   }
 
-  @Get('private')
+  @Get('/check-status')
+  @Auth()
+  checkAuthStatus(@GetUser() user: User) {
+    return this.authService.checkAuthStatus(user);
+  }
+
+  @Get('/private-ugly') // just to test -> in private 2 we use the decorator to simplify.
   @UseGuards(AuthGuard())
   testingPrivateRoute(
     @Req() req: Express.Request,
@@ -50,7 +56,7 @@ export class AuthController {
     };
   }
 
-  @Get('private2')
+  @Get('private')
   @RoleProtected(ValidRoles.ADMIN, ValidRoles.SUPER_USER)
   @UseGuards(AuthGuard(), UserRoleGuard)
   testingPrivateRouteScoped(@GetUser() user: User) {

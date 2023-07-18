@@ -59,6 +59,13 @@ export class AuthService {
     return token;
   }
 
+  async checkAuthStatus(user: User) {
+    return {
+      ...user,
+      token: this.getJwtToken({ id: user.id }),
+    };
+  }
+
   private handlerError(error: any): never {
     console.log(error.message);
     if (error.code === '23505') {
